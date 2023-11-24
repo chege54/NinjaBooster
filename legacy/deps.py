@@ -236,16 +236,18 @@ class NinjaManifestParser(object):
                 self._handle_globals(blk)
 
     def _read_depfile(self, path):
-        if not os.path.isfile(path):
-            return None
-        return file(path).read()
+        file_content = None
+        if os.path.isfile(path):
+            with open(path, 'r') as depfile:
+                file_content = depfile.read()
+        return file_content
 
     def _load_depfiles(self):
         parser = DepfileParser()
         for edge in self.edges:
             # TODO: support 'deps' dependencies format
             if self._eval_edge_attribute(edge, 'deps'):
-                warn("'deps' dependencies format specified for targets %r is not supported" % (list(edge.provides), ))
+                warn("'deps' dependencies format specified for targets %r is not supported") #% (list(edge.provides), ))
 
             depfile = self._eval_edge_attribute(edge, 'depfile')
             if not depfile:
@@ -422,7 +424,7 @@ class NinjaManifestParser(object):
         V3(">> split_unescape_and_eval('%s') -> '%s'" % (s, lst))
         return lst
 
-    _attr_sub_re = re.compile('(?<!\$)\$(\{)?(?P<attr>\w+)(?(1)})') # $attr or ${attr}
+    _attr_sub_re = re.compile(r'(?<!\$)\$(\{)?(?P<attr>\w+)(?(1)})') # $attr or ${attr}
     def _eval_attribute(self, scope, attribute):
         # TBD: use empty strings for undefined attributes or raise?
         V3(">>> evaluating attribute: '%s'" % attribute)
@@ -803,33 +805,33 @@ if __name__ == '__main__':
     ninja_incremental_graph = create_graph(args.manifest, ninja_parser, wanted, clean_build_graph=False)
     manifest_file.close()
 
-    # info("Parsing Trace log..")
-    # trace_file = open(args.tracefile, "r")
-    # trace_parser = TraceParser(trace_file)
+    info("Parsing Trace log..")
+    trace_file = open(args.tracefile, "r")
+    trace_parser = TraceParser(trace_file)
 
     # # Note: for now, always build a complete (e.g., all-targets-wanted) trace-graph
-    # trace_graph = create_graph(args.tracefile, trace_parser, targets=[])
+    trace_graph = create_graph(args.tracefile, trace_parser, targets=[])
 
     ### Verification passes
-    # H0()
-    # info("=== Pass #1: checking clean build order constraints ===")
-    # info("=== (may lead to clean build failure or, rarely, to incorrect builds) ===")
-    # missing, ignored = compare_dependencies(trace_graph, ninja_clean_build_graph, clean_build=True)
-    # if missing or ignored:
-    #     info("Errors: %d, Ignored: %d" % (len(missing), len(ignored)))
-    #     print_missing_dependencies(ninja_clean_build_graph, missing, ignored, clean_build=True)
-    # else:
-    #     info("No issues!")
+    H0()
+    info("=== Pass #1: checking clean build order constraints ===")
+    info("=== (may lead to clean build failure or, rarely, to incorrect builds) ===")
+    missing, ignored = compare_dependencies(trace_graph, ninja_clean_build_graph, clean_build=True)
+    if missing or ignored:
+        info("Errors: %d, Ignored: %d" % (len(missing), len(ignored)))
+        print_missing_dependencies(ninja_clean_build_graph, missing, ignored, clean_build=True)
+    else:
+        info("No issues!")
 
-    # H0()
-    # info("=== Pass #2: checking for missing dependencies ===")
-    # info("=== (may lead to incomlete incremental builds if any) ===")
-    # missing, ignored = compare_dependencies(trace_graph, ninja_incremental_graph, clean_build=False)
-    # if missing or ignored:
-    #     info("Errors: %d, Ignored: %d" % (len(missing), len(ignored)))
-    #     print_missing_dependencies(ninja_incremental_graph, missing, ignored, clean_build=False)
-    # else:
-    #     info("No issues!")
+    H0()
+    info("=== Pass #2: checking for missing dependencies ===")
+    info("=== (may lead to incomlete incremental builds if any) ===")
+    missing, ignored = compare_dependencies(trace_graph, ninja_incremental_graph, clean_build=False)
+    if missing or ignored:
+        info("Errors: %d, Ignored: %d" % (len(missing), len(ignored)))
+        print_missing_dependencies(ninja_incremental_graph, missing, ignored, clean_build=False)
+    else:
+        info("No issues!")
 
     ### Statistics passes
     if args.stats:
@@ -862,7 +864,7 @@ if __name__ == '__main__':
         H0()
         info("=== Targets by number of products ===")
         info("=== (e.g., how many targets are rebuilt if 'x' is touched) ===")
-        print_targets_by_depending_products(ninja_incremental_graph)
+        # print_targets_by_depending_products(ninja_incremental_graph)
 
     info("=== That's all! ===")
     sys.exit(0)

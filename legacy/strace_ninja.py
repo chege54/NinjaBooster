@@ -19,7 +19,7 @@
 # 1. clean everything!
 # 2. Generate the cmake. (DO NOT BUILD!)
 # 3. Call ninja with strace in the build folder:
-#    strace -ostrace_log -f -a1 -s0 -etrace=file,process -esignal=none ninja -C build/host_c66/
+#    strace -ostrace_log -f -a1 -s0 -etrace=file,process -esignal=none ninja -d keepdepfile -C build/host_c66/
 #    Note: -> strace_log could be more than 1gb!
 # 4. Parse the output log
 #   strace.py -v -r strace_log
