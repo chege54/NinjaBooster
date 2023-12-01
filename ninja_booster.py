@@ -151,47 +151,58 @@ class NinjaBooster:
 def count(self, list_to_count):
     return Counter(list_to_count)
 
+def get_compiled_target_deps(ninja_build_info: NinjaBooster, in_tree_only:bool=True) -> dict:
+    target_deps = dict()
+    compile_rules = ninja_build_info.filter_rules(contains="_COMPILER")
+    compile_targets = ninja_build_info.get_all_targets(compile_rules)
+    for compile_target in compile_targets:
+        d = ninja_build_info.get_in_tree_target_dependencies(compile_target) if in_tree_only \
+            else  ninja_build_info.get_target_dependencies(compile_target)
+        target_deps.update({compile_target : d})
 
+    return target_deps
 
-    def visualize_dependencies(self, dependencies):
-        dot = graphviz.Digraph(comment='cpp_dependencies',
-                            node_attr={
-                                    'fontname': 'Helvetica,Arial,sans-serif',
-                                    'fontsize':'10',
-                                    'shape':'box',
-                                    'height':'0.25',
-                                },
-                            edge_attr=
-                            {
-                                    'fontname': 'Helvetica,Arial,sans-serif',
-                                    'fontsize':'10',
-                            },
-                            graph_attr={"rankdir":"LR"})
+def visualize(dict_to_visu, trim_str="", key_filename_only:bool = True, value_filename_only:bool = False):
+    dot = graphviz.Digraph(comment='cpp_dependencies',
+        node_attr={
+            'fontname': 'Helvetica,Arial,sans-serif',
+            'fontsize':'10',
+            'shape':'box',
+            'height':'0.25',
+        },
+        edge_attr={
+            'fontname': 'Helvetica,Arial,sans-serif',
+            'fontsize':'10',
+        },
+        graph_attr={
+            "rankdir":"LR"
+        })
 
-        cnt = 0
-        for file, dependent_files in dependencies.items():
-            short_file = Path(file).name
-            dot.node(short_file)
-            for dependent_file in dependent_files:
-                short_dependent_file = str(Path(dependent_file))
-                dot.edge(short_file, short_dependent_file)
+    cnt = 0
+    for key, vals in dict_to_visu.items():
+        node_name = re.sub(rf"^{trim_str}","", key)
+        key.lstrip(trim_str)
+        if key_filename_only:
+            node_name = os.path.basename(node_name)
+        dot.node(node_name)
+        for value in vals:
+            value_node_name = re.sub(rf"^{trim_str}","", value)
+            if value_filename_only:
+                node_name = os.path.basename(node_name)
+            dot.edge(node_name, value_node_name)
 
-            cnt += 1
-            if cnt > 1:
-                break
+        cnt += 1
+        if cnt > 1:
+            break
 
-        dot.render('cpp_dependencies', format='png', cleanup=True, directory="asd", outfile='dependencies.png')
+    dot.render(filename='graphviz.dot', format='png', cleanup=False, outfile='graphviz.png')
 
 
 if __name__ == "__main__":
     build_directory = "build/host_c66"
 
-    ninja_build = NinjaBooster(build_directory)
-    compile_rules = ninja_build.filter_rules(contains="_COMPILER")
-    compile_targets = ninja_build.get_all_targets(compile_rules)
-
-    for compile_target in compile_targets:
-        d = ninja_build.get_in_tree_target_dependencies(compile_target)
-        pass
-
+    ninja_build_info = NinjaBooster(build_directory)
+    target_dep_dict = get_compiled_target_deps(ninja_build_info, in_tree_only=True)
+    visualize(target_dep_dict, ninja_build_info.root_folder)
+    pass
 
