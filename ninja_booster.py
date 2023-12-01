@@ -51,7 +51,11 @@ class NinjaBooster:
             print(f"{raw_deps} is not for {target} - something went wrong!")
 
         all_deps = [os.path.normpath(raw_dep.strip()) for raw_dep in raw_deps[1:]]
-        return all_deps
+        all_deps_set = set(all_deps)
+        if len(all_deps) != len(all_deps_set):
+            print(f"WARNING: {target} has {len(all_deps_set)} unique dependencies - Ninja collected: {len(all_deps)}. Duplicates are removed!")
+
+        return list(all_deps_set)
 
     def _collect_file_dependencies_of_targets(self):
         dependencies_of_target = dict()
@@ -156,8 +160,13 @@ def count(dictionary):
 
     return Counter(all_values), all_values_set
 
-def to_dataframe(dictionary, index):
-    pass
+def to_dataframe(dictionary):
+    df = pd.DataFrame()
+    for key, values in dictionary.items():
+        short_key = os.path.basename(key)
+        data = ["X"] * len(values) # values are 'X', index = values, key is the col name
+        df = df.join(pd.Series(data=data, index=values, name=short_key), how='outer')
+    return df
 
 def get_compiled_target_deps(ninja_build_info: NinjaBooster, in_tree_only:bool=True) -> dict:
     target_deps = dict()
@@ -221,8 +230,10 @@ if __name__ == "__main__":
 
     # Statistics
     dependency_counts, dependency_set = count(target_dep_dict)
-    print(f"TOP 5 dependencies are: {dependency_counts.most_common(5)}")
+    print("TOP 5 dependencies are:", *dependency_counts.most_common(5), sep="\n")
 
     # Visualize
-    visualize(target_dep_dict, trim_str=ninja_build_info.root_folder)# filtered_nodes=[""]
-    df = to_dataframe(target_dep_dict, dependency_set)
+    #visualize(target_dep_dict, trim_str=ninja_build_info.root_folder)# filtered_nodes=[""]
+    df = to_dataframe(target_dep_dict)
+    df.to_csv("dependency_matrix.csv")
+    df.to_excel("dependency_matrix.xlsx")
