@@ -148,8 +148,16 @@ class NinjaBooster:
         in_tree_dirs = [dir for dir in all_dirs if self.in_tree(dir)]
         return in_tree_dirs
 
-def count(self, list_to_count):
-    return Counter(list_to_count)
+def count(dictionary):
+    all_values = []
+    for _, vals in dictionary.items():
+        all_values.extend(vals)
+    all_values_set = set(all_values)
+
+    return Counter(all_values), all_values_set
+
+def to_dataframe(dictionary, index):
+    pass
 
 def get_compiled_target_deps(ninja_build_info: NinjaBooster, in_tree_only:bool=True) -> dict:
     target_deps = dict()
@@ -162,8 +170,8 @@ def get_compiled_target_deps(ninja_build_info: NinjaBooster, in_tree_only:bool=T
 
     return target_deps
 
-def visualize(dict_to_visu, trim_str="", key_filename_only:bool = True, value_filename_only:bool = False):
-    dot = graphviz.Digraph(comment='cpp_dependencies',
+def visualize(dict_to_visu, trim_str="", filtered_nodes:list = [], key_filename_only:bool = True, value_filename_only:bool = False):
+    dot = graphviz.Digraph(comment='vizu',
         node_attr={
             'fontname': 'Helvetica,Arial,sans-serif',
             'fontsize':'10',
@@ -178,10 +186,18 @@ def visualize(dict_to_visu, trim_str="", key_filename_only:bool = True, value_fi
             "rankdir":"LR"
         })
 
-    cnt = 0
+    def keep_it(node_name:str, postive_strings:list):
+        keep_it = False or not postive_strings
+        for p in postive_strings:
+            # positive filter to keep only the wanted nodes
+            keep_it = keep_it or (p in node_name)
+        return keep_it
+
     for key, vals in dict_to_visu.items():
         node_name = re.sub(rf"^{trim_str}","", key)
-        key.lstrip(trim_str)
+        if not keep_it(node_name, filtered_nodes):
+            continue
+
         if key_filename_only:
             node_name = os.path.basename(node_name)
         dot.node(node_name)
@@ -191,18 +207,22 @@ def visualize(dict_to_visu, trim_str="", key_filename_only:bool = True, value_fi
                 node_name = os.path.basename(node_name)
             dot.edge(node_name, value_node_name)
 
-        cnt += 1
-        if cnt > 1:
-            break
-
     dot.render(filename='graphviz.dot', format='png', cleanup=False, outfile='graphviz.png')
 
 
 if __name__ == "__main__":
+    # Arg parser:
+    # TODO
     build_directory = "build/host_c66"
 
+    # Create env.
     ninja_build_info = NinjaBooster(build_directory)
     target_dep_dict = get_compiled_target_deps(ninja_build_info, in_tree_only=True)
-    visualize(target_dep_dict, ninja_build_info.root_folder)
-    pass
 
+    # Statistics
+    dependency_counts, dependency_set = count(target_dep_dict)
+    print(f"TOP 5 dependencies are: {dependency_counts.most_common(5)}")
+
+    # Visualize
+    visualize(target_dep_dict, trim_str=ninja_build_info.root_folder)# filtered_nodes=[""]
+    df = to_dataframe(target_dep_dict, dependency_set)
