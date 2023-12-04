@@ -9,13 +9,18 @@ import pandas as pd
 class NinjaBooster:
     NINJA_VERSION = 1.11
 
-    def __init__(self, build_dir, root_folder=None) -> None:
+    def __init__(self, build_dir, root_folder=None, build_all=True) -> None:
         self.root_folder = root_folder and os.path.isdir(root_folder) or os.getcwd()
         self.build_dir = build_dir if os.path.isabs(build_dir) else os.path.normpath(f"{self.root_folder}/{build_dir}")
         self.rules = self._get_all_ninja_rules()
         self.targets_per_rule: dict = self._collect_targets_of_rules()
+        if(build_all):
+            # os.isfile() check on compile and link outputs can work only after a build
+            # ninja collects deps from compiler
+            self._call_ninja_build()
+
         self.file_dependencies_per_target: dict  = self._collect_file_dependencies_of_targets()
-        self.inputs_per_target: dict  = self._collect_inputs_of_targets()
+        self.target_inputs_per_file_target: dict  = self._collect_inputs_of_file_targets()
 
     '''
         Internal functions
@@ -25,6 +30,9 @@ class NinjaBooster:
     def _call_ninja_tool(self, toolname) -> list:
         re = subprocess.check_output(f"ninja -C {self.build_dir} -t {toolname}", shell=True, universal_newlines=True)
         return [r for r in re.splitlines() if r] # filter out "" strings
+
+    def _call_ninja_build(self, target='all') -> list:
+        print(subprocess.check_output(f"ninja -C {self.build_dir} -j {os.cpu_count()} {target}", shell=True, universal_newlines=True))
 
     def _get_all_ninja_rules(self) -> list:
         all_rules = self._call_ninja_tool('rules')
@@ -66,6 +74,7 @@ class NinjaBooster:
                     dependencies_of_target.update({target : deps})
         return dependencies_of_target
 
+    ''' Method recursively collects until all file inputs are collected '''
     def _collect_file_inputs(self, target:str):
         inputs = self._call_ninja_tool(f"inputs {target}")
         input_files = []
@@ -76,16 +85,38 @@ class NinjaBooster:
                 input_files.extend(self._collect_file_inputs(i))
         return input_files
 
-    def _collect_inputs_of_targets(self):
+    ''' TODO '''
+    def _collect_file_inputs_of_targets(self):
         inputs_per_targets = dict()
         for _, targets in self.targets_per_rule.items():
             for target in targets:
-                if target.endswith(".o"):
+                if target.endswith(".o") or target.endswith(".a"):
                     # Do it only if target is an object file - it causes huge runtime for install files
                     inputs = self._collect_file_inputs(target)
                     inputs_per_targets.update({target : inputs})
 
         return inputs_per_targets
+
+    '''
+    Method collects all file inputs of compile or link rule targets
+     TODO: do not rely on rule name, just the output - it can be
+     unstable on non CMAKE generated ninja.build/ninja.rules
+    '''
+    def _collect_inputs_of_file_targets(self):
+        final_targets = dict()
+        compile_link_targets = (targets for rule, targets in self.targets_per_rule.items()
+                                if re.search(r'COMPILE|LINK', rule, re.IGNORECASE))
+        # keep built(existing) and in build directory targets only
+        file_targets = [target for targets in compile_link_targets
+                        for target in targets if os.path.isfile(os.path.join(self.build_dir,target))
+                        and not os.path.isabs(target)]
+        # filter those targets that depends on another compile or link_targets (intermediate targets)
+        for target in file_targets:
+            immediate_inputs = [inp for inp in self._call_ninja_tool(f"inputs {target}")
+                           if inp in file_targets]
+            if immediate_inputs:
+                final_targets.update({target:immediate_inputs})
+        return final_targets
 
 
     ''' API functions which should be called '''
@@ -152,6 +183,33 @@ class NinjaBooster:
         in_tree_dirs = [dir for dir in all_dirs if self.in_tree(dir)]
         return in_tree_dirs
 
+    '''
+    '''
+    def get_final_target_input_dependencies(self) -> dict:
+        final_target_deps = dict()
+        for final_target, intermediates in self.target_inputs_per_file_target.items():
+            all_deps = []
+            for i in intermediates:
+                dependencies = self.file_dependencies_per_target.get(i, None)
+                if dependencies:
+                    all_deps.extend(dependencies)
+            final_target_deps.update({final_target:set(all_deps)})
+        return final_target_deps
+
+    def get_in_tree_final_target_input_dependencies(self) -> dict:
+        in_tree_final_target_deps = dict()
+        for k, all_deps in self.get_final_target_input_dependencies().items():
+            in_tree_deps =[dep for dep in all_deps if self.in_tree(dep)]
+            in_tree_final_target_deps.update({k:in_tree_deps})
+        return in_tree_final_target_deps
+
+    def get_dependencies_folder(self, target_dependency_dict) -> dict:
+        folder_deps = dict()
+        for k, all_deps in target_dependency_dict.items():
+            folders =(os.path.dirname(dep) for dep in all_deps if self.in_tree(dep))
+            folder_deps.update({k: set(folders)})
+        return folder_deps
+
 def count(dictionary):
     all_values = []
     for _, vals in dictionary.items():
@@ -179,7 +237,7 @@ def get_compiled_target_deps(ninja_build_info: NinjaBooster, in_tree_only:bool=T
 
     return target_deps
 
-def visualize(dict_to_visu, trim_str="", filtered_nodes:list = [], key_filename_only:bool = True, value_filename_only:bool = False):
+def visualize(dict_to_visu, filename="graphviz", trim_str="", filtered_nodes:list = [], key_filename_only:bool = True, value_filename_only:bool = False):
     dot = graphviz.Digraph(comment='vizu',
         node_attr={
             'fontname': 'Helvetica,Arial,sans-serif',
@@ -216,8 +274,7 @@ def visualize(dict_to_visu, trim_str="", filtered_nodes:list = [], key_filename_
                 node_name = os.path.basename(node_name)
             dot.edge(node_name, value_node_name)
 
-    dot.render(filename='graphviz.dot', format='png', cleanup=False, outfile='graphviz.png')
-
+    dot.render(filename=f'{filename}.dot', format='png', cleanup=False, outfile=f'{filename}.png')
 
 if __name__ == "__main__":
     # Arg parser:
@@ -227,13 +284,23 @@ if __name__ == "__main__":
     # Create env.
     ninja_build_info = NinjaBooster(build_directory)
     target_dep_dict = get_compiled_target_deps(ninja_build_info, in_tree_only=True)
+    target_folder_dependencies = ninja_build_info.get_dependencies_folder(target_dep_dict)
+
+    in_tree_final_target_dependencies = ninja_build_info.get_in_tree_final_target_input_dependencies()
+    in_tree_final_target_folder_dependencies = ninja_build_info.get_dependencies_folder(in_tree_final_target_dependencies)
 
     # Statistics
     dependency_counts, dependency_set = count(target_dep_dict)
     print("TOP 5 dependencies are:", *dependency_counts.most_common(5), sep="\n")
 
     # Visualize
-    #visualize(target_dep_dict, trim_str=ninja_build_info.root_folder)# filtered_nodes=[""]
-    df = to_dataframe(target_dep_dict)
+    visualize(target_dep_dict, filename="object_deps" ,trim_str=ninja_build_info.root_folder)# filtered_nodes=[""]
+    visualize(target_folder_dependencies, filename="object_deps_folder_deps")# filtered_nodes=[""]
+
+    visualize(in_tree_final_target_dependencies, filename="final_target_deps", trim_str=ninja_build_info.root_folder)# filtered_nodes=[""]
+    visualize(in_tree_final_target_folder_dependencies, filename="final_target_folder_deps", trim_str=ninja_build_info.root_folder)# filtered_nodes=[""]
+
+    # dataframe
+    df = to_dataframe(in_tree_final_target_dependencies)
     df.to_csv("dependency_matrix.csv")
     df.to_excel("dependency_matrix.xlsx")
